@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Huntera Party Analyzer
-// @namespace    huntera-dps-counter-local
+// @namespace    huntera-party-analyzer
 // @version      3.0
 // @description  Analise de dano e experiencia de ate 4 personagens em uma party.
 // @match        https://huntera.com.br/game*
