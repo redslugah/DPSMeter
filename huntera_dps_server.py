@@ -13,6 +13,7 @@ HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8765"))
 MAX_CHARS = 4
 COMBAT_TIMEOUT = float(os.environ.get("COMBAT_TIMEOUT", "15"))
+XP_TIMEOUT = float(os.environ.get("XP_TIMEOUT", "15"))
 EVENT_RETENTION = 15 * 60  # keep 15 min of hit timestamps for rolling DPS / timer
 
 state_lock = Lock()
@@ -26,6 +27,7 @@ def new_party():
         "resetAt": now_ms(),
         "chars": {},
         "events": [],
+        "xp_events": [],
     }
 
 def clean_events(party, now=None):
@@ -33,6 +35,7 @@ def clean_events(party, now=None):
         now = now_ms()
     cutoff = now - EVENT_RETENTION * 1000
     party["events"] = [e for e in party["events"] if e["ts"] >= cutoff and e["ts"] >= party["resetAt"]]
+    party["xp_events"] = [e for e in party["xp_events"] if e["ts"] >= cutoff and e["ts"] >= party["resetAt"]]
 
 def combat_metrics(party, now=None):
     if now is None:
@@ -53,6 +56,22 @@ def combat_metrics(party, now=None):
     active = (now - last) <= COMBAT_TIMEOUT * 1000
     return active_ms / 1000.0, active, events[0]["ts"], last
 
+def xp_active_seconds(party, now=None):
+    if now is None:
+        now = now_ms()
+    events = sorted(party["xp_events"], key=lambda e: e["ts"])
+    if not events:
+        return 0.0
+
+    active_ms = 0.0
+    previous = events[0]["ts"]
+    for event in events[1:]:
+        gap = max(0, event["ts"] - previous)
+        active_ms += min(gap, XP_TIMEOUT * 1000)
+        previous = event["ts"]
+    active_ms += min(max(0, now - previous), XP_TIMEOUT * 1000)
+    return active_ms / 1000.0
+
 def build_state(party, now=None):
     if now is None:
         now = now_ms()
@@ -67,6 +86,7 @@ def build_state(party, now=None):
             "maxHit": c["maxHit"],
             "lastSeen": c["lastSeen"],
             "lastHit": c.get("lastHit", 0),
+            "xp": c.get("xp", 0),
         }
     return {
         "resetAt": party["resetAt"],
@@ -74,6 +94,7 @@ def build_state(party, now=None):
         "fightStartedAt": first_hit,
         "lastHitAt": last_hit,
         "activeSeconds": active_seconds,
+        "xpActiveSeconds": xp_active_seconds(party, now),
         "combatActive": active,
         "serverNow": now,
         "maxChars": MAX_CHARS,
@@ -205,6 +226,7 @@ class Handler(BaseHTTPRequestHandler):
                     "voc": voc,
                     "damage": old["damage"] if old else 0,
                     "maxHit": old["maxHit"] if old else 0,
+                    "xp": old.get("xp", 0) if old else 0,
                     "lastSeen": now_ms(),
                     "lastHit": old.get("lastHit", 0) if old else 0,
                 }
@@ -236,6 +258,28 @@ class Handler(BaseHTTPRequestHandler):
                 send_json(self, 200, {"ok": True})
                 return
 
+            if path == "/xp":
+                cid = str(data.get("client_id", ""))[:100]
+                try:
+                    amount = int(data.get("amount", 0))
+                    ts = int(data.get("ts", now_ms()))
+                except Exception:
+                    amount, ts = 0, now_ms()
+                now = now_ms()
+                ts = max(party["resetAt"], min(ts, now + 1000))
+                if cid not in party["chars"]:
+                    send_json(self, 409, {"error": "not_registered"})
+                    return
+                if amount <= 0 or amount > 10**9:
+                    send_json(self, 400, {"error": "invalid_xp"})
+                    return
+                party["chars"][cid]["xp"] = party["chars"][cid].get("xp", 0) + amount
+                party["chars"][cid]["lastSeen"] = now
+                party["xp_events"].append({"cid": cid, "amount": amount, "ts": ts})
+                clean_events(party, now)
+                send_json(self, 200, {"ok": True})
+                return
+
             if path == "/heartbeat":
                 cid = str(data.get("client_id", ""))[:100]
                 if cid in party["chars"]:
@@ -246,10 +290,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/reset":
                 party["resetAt"] = now_ms()
                 party["events"] = []
+                party["xp_events"] = []
                 # Preserve registered characters, but zero their fight stats.
                 for c in party["chars"].values():
                     c["damage"] = 0
                     c["maxHit"] = 0
+                    c["xp"] = 0
                     c["lastHit"] = 0
                     c["lastSeen"] = party["resetAt"]
                 send_json(self, 200, party_payload(party))
