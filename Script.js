@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Huntera Party Analyzer
 // @namespace    huntera-party-analyzer
-// @version      3.7
+// @version      3.8
 // @description  Analise de dano e experiencia de ate 4 personagens em uma party.
 // @homepageURL  https://github.com/redslugah/HunteraPartyAnalyzer
 // @updateURL    https://raw.githubusercontent.com/redslugah/HunteraPartyAnalyzer/main/Script.js
@@ -137,6 +137,22 @@
     } catch (e) {}
   }
 
+  function clampToViewport(save) {
+    var rect = host.getBoundingClientRect();
+    var margin = 8;
+    var maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+    var maxRight = Math.max(margin, window.innerWidth - rect.width - margin);
+    var top = Math.min(Math.max(rect.top, margin), maxTop);
+    var right = Math.min(Math.max(window.innerWidth - rect.right, margin), maxRight);
+
+    host.style.top = top + "px";
+    host.style.right = right + "px";
+
+    if (save) {
+      savePos({ top: Math.round(top), right: Math.round(right) });
+    }
+  }
+
   var pos = loadPos();
 
   var host = document.createElement("div");
@@ -144,6 +160,7 @@
   host.style.position = "fixed";
   host.style.top = pos.top + "px";
   host.style.right = pos.right + "px";
+  host.style.maxWidth = "calc(100vw - 16px)";
   host.style.zIndex = "2147483647";
 
   document.body.appendChild(host);
@@ -156,9 +173,9 @@
     "*{box-sizing:border-box}",
     ":host{all:initial}",
 
-    ".panel{font-family:Inter,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;color:#eef2f6;width:310px;background:rgba(16,20,28,.92);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.09);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.45);overflow:hidden;font-variant-numeric:tabular-nums}",
+    ".panel{font-family:Inter,system-ui,-apple-system,'Segoe UI',Arial,sans-serif;color:#eef2f6;width:310px;max-width:calc(100vw - 16px);background:rgba(16,20,28,.92);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.09);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.45);overflow:hidden;font-variant-numeric:tabular-nums}",
 
-    ".panel.big{width:520px}",
+    ".panel.big{width:520px;max-width:calc(100vw - 16px)}",
 
     ".head{display:flex;align-items:center;gap:6px;padding:7px 9px;cursor:move;user-select:none;background:rgba(0,0,0,.25);border-bottom:1px solid rgba(255,255,255,.08)}",
 
@@ -206,6 +223,11 @@
   panel.className = "panel" + (bigMode ? " big" : "");
 
   root.appendChild(panel);
+
+  clampToViewport(true);
+  window.addEventListener("resize", function () {
+    clampToViewport(true);
+  });
 
   function fmt(n) {
     n = Number(n) || 0;
@@ -1166,6 +1188,8 @@
         host.style.right =
           (sr - (e.clientX - sx)) +
           "px";
+
+        clampToViewport(false);
 
       }
     );
