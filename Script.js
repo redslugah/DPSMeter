@@ -6,14 +6,14 @@
 // @match        https://huntera.com.br/game*
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
-// @connect      hunteradpsmeter.onrender.com
+// @connect      hunterapartyanalyzer.onrender.com
 // ==/UserScript==
 
 (function () {
   "use strict";
 
   // Substitua pelo endereco do seu Web Service no Render.
-  var API = "https://hunteradpsmeter.onrender.com";
+  var API = "https://hunterapartyanalyzer.onrender.com";
   var STALE_MS = 15000;
   var POLL_MS = 1000;
   var HEARTBEAT_MS = 5000;
