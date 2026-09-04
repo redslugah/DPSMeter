@@ -26,8 +26,8 @@ O script reconhece automaticamente `Você ganhou 73 de experiência.` e
 `You gained 73 experience points.`. O painel mostra o XP acumulado e o XP/h
 de cada personagem.
 
-O tempo ativo usado no XP/h e independente do DPS. Para alterar, adicione no
-Render a variavel `XP_TIMEOUT`, tambem em segundos, e faca um novo deploy.
+O tempo ativo usado no XP/h e independente do DPS e acumulado durante toda a
+hunt. Para alterar, adicione no Render a variavel `XP_TIMEOUT`, tambem em segundos, e faca um novo deploy.
 Se nao for configurada, o padrao e 15 segundos.
 
 O servidor usa automaticamente a porta `PORT` fornecida pelo Render. O endpoint

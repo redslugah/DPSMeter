@@ -38,6 +38,8 @@ def new_party():
         "chars": {},
         "events": [],
         "xp_events": [],
+        "xp_active_ms": 0,
+        "xp_last_event_ts": None,
     }
 
 def clean_events(party, now=None):
@@ -69,18 +71,13 @@ def combat_metrics(party, now=None):
 def xp_active_seconds(party, now=None):
     if now is None:
         now = now_ms()
-    events = sorted(party["xp_events"], key=lambda e: e["ts"])
-    if not events:
+    last_event_ts = party.get("xp_last_event_ts")
+    if last_event_ts is None:
         return 0.0
 
-    active_ms = 0.0
-    previous = events[0]["ts"]
-    for event in events[1:]:
-        gap = max(0, event["ts"] - previous)
-        active_ms += min(gap, XP_TIMEOUT * 1000)
-        previous = event["ts"]
-    active_ms += min(max(0, now - previous), XP_TIMEOUT * 1000)
-    return active_ms / 1000.0
+    current_ms = party.get("xp_active_ms", 0)
+    current_ms += min(max(0, now - last_event_ts), XP_TIMEOUT * 1000)
+    return current_ms / 1000.0
 
 def build_state(party, now=None):
     if now is None:
@@ -336,6 +333,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not event_capacity_available(party, party["xp_events"], cid, MAX_EVENTS_PER_CHAR):
                     send_json(self, 429, {"error": "event_capacity"})
                     return
+                previous_xp_ts = party.get("xp_last_event_ts")
+                if previous_xp_ts is not None:
+                    party["xp_active_ms"] = party.get("xp_active_ms", 0) + min(
+                        max(0, ts - previous_xp_ts),
+                        XP_TIMEOUT * 1000,
+                    )
+                party["xp_last_event_ts"] = ts
                 party["chars"][cid]["xp"] = party["chars"][cid].get("xp", 0) + amount
                 party["chars"][cid]["lastSeen"] = now
                 party["xp_events"].append({"cid": cid, "amount": amount, "ts": ts})
@@ -353,6 +357,8 @@ class Handler(BaseHTTPRequestHandler):
                 party["resetAt"] = now_ms()
                 party["events"] = []
                 party["xp_events"] = []
+                party["xp_active_ms"] = 0
+                party["xp_last_event_ts"] = None
                 # Preserve registered characters, but zero their fight stats.
                 for c in party["chars"].values():
                     c["damage"] = 0
