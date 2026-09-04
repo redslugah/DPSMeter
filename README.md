@@ -135,7 +135,9 @@ You gained 73 experience points.
 
 O servidor considera o combate ativo enquanto houve dano recente. O valor padrao e de 15 segundos sem dano.
 
-O calculo de XP/h usa um tempo ativo acumulado separado, tambem com padrao de 15 segundos sem XP. O acumulador continua considerando a hunt inteira mesmo quando os eventos antigos saem da janela de retencao, evitando que sessoes longas produzam um XP/h artificialmente alto.
+O DPS principal usa a duracao total da hunt, desde o primeiro hit ate o momento atual, e todo o dano acumulado do personagem. Assim, pausas e hunts com mais de 15 minutos nao fazem o DPS reiniciar ou ficar limitado a janela de eventos recentes.
+
+O calculo de XP/h usa um tempo ativo acumulado separado, tambem com padrao de 15 segundos sem XP. O acumulador continua considerando a hunt inteira mesmo quando os eventos antigos saem da janela de retencao, evitando que sessoes longas produzam um XP/h artificialmente alto. Eventos recebidos fora de ordem por navegadores simultaneos nao duplicam esse tempo.
 
 ## Limites e observacoes
 

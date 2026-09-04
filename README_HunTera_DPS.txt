@@ -59,7 +59,7 @@ IMPORTANTE
 - O script foi ajustado para o log em inglês: "You hit ... for 1234".
 - Linhas antigas do combat log NÃO são reprocessadas ao recarregar a página, evitando duplicação.
 - Reset zera a hunt, mas preserva os personagens cadastrados.
-- DPS principal = dano total / tempo de combate ativo.
+- DPS principal = dano total / duração total da hunt desde o primeiro hit.
 - DPS 10s = dano causado nos últimos 10 segundos / 10.
 - Combate fica como ativo enquanto houver pelo menos um hit da party dentro do
    valor configurado em `COMBAT_TIMEOUT`.

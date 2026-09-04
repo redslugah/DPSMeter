@@ -35,11 +35,12 @@ def new_party():
     return {
         "resetAt": timestamp,
         "lastActivity": timestamp,
+        "fight_started_at": None,
         "chars": {},
         "events": [],
         "xp_events": [],
         "xp_active_ms": 0,
-        "xp_last_event_ts": None,
+        "xp_latest_event_ts": None,
     }
 
 def clean_events(party, now=None):
@@ -71,7 +72,7 @@ def combat_metrics(party, now=None):
 def xp_active_seconds(party, now=None):
     if now is None:
         now = now_ms()
-    last_event_ts = party.get("xp_last_event_ts")
+    last_event_ts = party.get("xp_latest_event_ts", party.get("xp_last_event_ts"))
     if last_event_ts is None:
         return 0.0
 
@@ -84,6 +85,12 @@ def build_state(party, now=None):
         now = now_ms()
     clean_events(party, now)
     active_seconds, active, first_hit, last_hit = combat_metrics(party, now)
+    fight_started_at = party.get("fight_started_at")
+    fight_duration_seconds = (
+        max(0, now - fight_started_at) / 1000.0
+        if fight_started_at is not None
+        else 0.0
+    )
     chars = {}
     for cid, c in party["chars"].items():
         chars[cid] = {
@@ -98,7 +105,8 @@ def build_state(party, now=None):
     return {
         "resetAt": party["resetAt"],
         "chars": chars,
-        "fightStartedAt": first_hit,
+        "fightStartedAt": fight_started_at,
+        "fightDurationSeconds": fight_duration_seconds,
         "lastHitAt": last_hit,
         "activeSeconds": active_seconds,
         "xpActiveSeconds": xp_active_seconds(party, now),
@@ -306,6 +314,8 @@ class Handler(BaseHTTPRequestHandler):
                     send_json(self, 429, {"error": "event_capacity"})
                     return
                 c = party["chars"][cid]
+                if party.get("fight_started_at") is None:
+                    party["fight_started_at"] = now
                 c["damage"] += damage
                 c["maxHit"] = max(c["maxHit"], damage)
                 c["lastSeen"] = now
@@ -333,13 +343,18 @@ class Handler(BaseHTTPRequestHandler):
                 if not event_capacity_available(party, party["xp_events"], cid, MAX_EVENTS_PER_CHAR):
                     send_json(self, 429, {"error": "event_capacity"})
                     return
-                previous_xp_ts = party.get("xp_last_event_ts")
-                if previous_xp_ts is not None:
+                latest_xp_ts = party.get(
+                    "xp_latest_event_ts",
+                    party.get("xp_last_event_ts"),
+                )
+                if latest_xp_ts is None:
+                    party["xp_latest_event_ts"] = ts
+                elif ts > latest_xp_ts:
                     party["xp_active_ms"] = party.get("xp_active_ms", 0) + min(
-                        max(0, ts - previous_xp_ts),
+                        ts - latest_xp_ts,
                         XP_TIMEOUT * 1000,
                     )
-                party["xp_last_event_ts"] = ts
+                    party["xp_latest_event_ts"] = ts
                 party["chars"][cid]["xp"] = party["chars"][cid].get("xp", 0) + amount
                 party["chars"][cid]["lastSeen"] = now
                 party["xp_events"].append({"cid": cid, "amount": amount, "ts": ts})
@@ -355,10 +370,11 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/reset":
                 party["resetAt"] = now_ms()
+                party["fight_started_at"] = None
                 party["events"] = []
                 party["xp_events"] = []
                 party["xp_active_ms"] = 0
-                party["xp_last_event_ts"] = None
+                party["xp_latest_event_ts"] = None
                 # Preserve registered characters, but zero their fight stats.
                 for c in party["chars"].values():
                     c["damage"] = 0

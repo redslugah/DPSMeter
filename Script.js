@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Huntera Party Analyzer
 // @namespace    huntera-party-analyzer
-// @version      3.8
+// @version      3.9
 // @description  Analise de dano e experiencia de ate 4 personagens em uma party.
 // @homepageURL  https://github.com/redslugah/HunteraPartyAnalyzer
 // @updateURL    https://raw.githubusercontent.com/redslugah/HunteraPartyAnalyzer/main/Script.js
@@ -657,8 +657,8 @@
 
       if (selected) {
         var selectedVoc = VOC_BY_KEY[selected.voc];
-        var selectedDps = data.activeSeconds > 0
-          ? selected.damage / data.activeSeconds
+        var selectedDps = (data.fightDurationSeconds || data.activeSeconds) > 0
+          ? selected.damage / (data.fightDurationSeconds || data.activeSeconds)
           : 0;
         var selectedXph = data.xpActiveSeconds > 0
           ? selected.xp / data.xpActiveSeconds * 3600
@@ -711,8 +711,8 @@
         : "#8b95a3";
 
       var dps =
-        data.activeSeconds > 0
-          ? c.damage / data.activeSeconds
+        (data.fightDurationSeconds || data.activeSeconds) > 0
+          ? c.damage / (data.fightDurationSeconds || data.activeSeconds)
           : 0;
 
       var xph =
