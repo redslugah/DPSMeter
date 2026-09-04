@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Huntera Party Analyzer
 // @namespace    huntera-party-analyzer
-// @version      4.2
+// @version      4.3
 // @description  Analise de dano e experiencia de ate 4 personagens em uma party.
 // @homepageURL  https://github.com/redslugah/HunteraPartyAnalyzer
 // @updateURL    https://raw.githubusercontent.com/redslugah/HunteraPartyAnalyzer/main/Script.js
@@ -86,6 +86,7 @@
   var combatObserver = null;
   var seenNodes = new WeakSet();
   var selectedCharacterId = null;
+  var latestStateRequestId = 0;
 
   function request(method, path, body, callback) {
     var headers = {
@@ -572,6 +573,15 @@
 
   function render(data) {
     if (!data) {
+      return;
+    }
+
+    var incomingChars = data.chars || {};
+    var currentChars = latestState && latestState.chars || {};
+    if (
+      Object.keys(incomingChars).length === 0 &&
+      Object.keys(currentChars).length > 0
+    ) {
       return;
     }
 
@@ -1231,12 +1241,17 @@
 
   function poll() {
     var requestPartyToken = partyToken;
+    var requestId = ++latestStateRequestId;
 
     request(
       "GET",
       "/state",
       null,
       function (err, status, data) {
+
+        if (requestId !== latestStateRequestId) {
+          return;
+        }
 
         if (
           err ||
