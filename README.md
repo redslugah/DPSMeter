@@ -133,7 +133,7 @@ You gained 73 experience points.
 
 ## Tempo de combate e XP/h
 
-O servidor considera o combate ativo enquanto houve dano recente. O valor padrao e de 15 segundos sem dano.
+O servidor considera o combate ativo enquanto houve dano recente. O valor padrao e de 15 segundos sem dano. O painel mostra separadamente a duracao total da sessao desde o primeiro hit.
 
 O DPS principal usa a duracao total da hunt, desde o primeiro hit ate o momento atual, e todo o dano acumulado do personagem. Assim, pausas e hunts com mais de 15 minutos nao fazem o DPS reiniciar ou ficar limitado a janela de eventos recentes.
 

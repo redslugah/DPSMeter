@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Huntera Party Analyzer
 // @namespace    huntera-party-analyzer
-// @version      3.9
+// @version      4.2
 // @description  Analise de dano e experiencia de ate 4 personagens em uma party.
 // @homepageURL  https://github.com/redslugah/HunteraPartyAnalyzer
 // @updateURL    https://raw.githubusercontent.com/redslugah/HunteraPartyAnalyzer/main/Script.js
 // @downloadURL  https://raw.githubusercontent.com/redslugah/HunteraPartyAnalyzer/main/Script.js
-// @match        https://huntera.com.br/game*
+// @match        https://huntera.com.br/*
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -17,6 +17,10 @@
 
 (function () {
   "use strict";
+
+  if (!/^\/(?:characters|game)(?:\/|$)/.test(window.location.pathname)) {
+    return;
+  }
 
   // Substitua pelo endereco do seu Web Service no Render.
   var API = "https://hunterapartyanalyzer.onrender.com";
@@ -636,8 +640,8 @@
     var summary =
       '<div class="summary">' +
         '<div class="summary-meta">' +
-          '<span>Tempo ativo: ' +
-            fmtTime(data.activeSeconds || 0) +
+          '<span>Tempo da sessão: ' +
+            fmtTime(data.fightDurationSeconds || data.activeSeconds || 0) +
           '</span>' +
         '</div>' +
       '</div>';
