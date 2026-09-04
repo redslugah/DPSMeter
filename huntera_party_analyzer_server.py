@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Relay for the HunTera DPS Counter, suitable for Render or local use."""
+"""Relay for Huntera Party Analyzer, suitable for Render or local use."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from threading import Lock
@@ -152,7 +152,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/health":
-            send_json(self, 200, {"ok": True, "service": "huntera-dps", "port": PORT})
+            send_json(self, 200, {"ok": True, "service": "huntera-party-analyzer", "port": PORT})
             return
         if path == "/state":
             party = auth_party(self)
@@ -304,7 +304,7 @@ class Handler(BaseHTTPRequestHandler):
         send_json(self, 404, {"error": "not found"})
 
 if __name__ == "__main__":
-    print(f"HunTera DPS relay running at http://{HOST}:{PORT}")
+    print(f"Huntera Party Analyzer running at http://{HOST}:{PORT}")
     print("Party data is held in memory. Keep this process running while using the DPS meter.")
     print("Press Ctrl+C to stop.")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

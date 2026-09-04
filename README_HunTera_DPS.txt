@@ -1,13 +1,13 @@
-HUNTERA DPS COUNTER 3.0 - CHROME + OPERA GX
+HUNTERA PARTY ANALYZER 3.0 - CHROME + OPERA GX
 
 Arquivos:
 - HunTera_DPS_Counter.user.js -> instalar no Tampermonkey em Chrome e Opera GX.
-- huntera_dps_server.py -> servidor que compartilha o DPS entre ate 4 pessoas.
+- huntera_party_analyzer_server.py -> servidor que compartilha o DPS entre ate 4 pessoas.
 
 DEPLOY NO RENDER
 1. Suba estes arquivos em um repositorio GitHub.
 2. No Render, crie um Web Service conectado ao repositorio.
-3. Use Runtime Python e o comando de start: `python huntera_dps_server.py`.
+3. Use Runtime Python e o comando de start: `python huntera_party_analyzer_server.py`.
 4. O Render fornece uma URL parecida com `https://meu-dps.onrender.com`.
 5. No `Script.js`, troque `https://SEU-APP.onrender.com` pela URL real do seu servico.
 6. Reinstale/atualize o userscript no Tampermonkey de todos os jogadores.
@@ -37,7 +37,7 @@ COMO USAR
 1. Instale Tampermonkey no Chrome e no Opera GX.
 2. No Tampermonkey de CADA navegador, crie um script novo e cole HunTera_DPS_Counter.user.js.
 3. No Windows, abra um Prompt de Comando/PowerShell na pasta dos arquivos e execute (modo local):
-   python huntera_dps_server.py
+   python huntera_party_analyzer_server.py
 4. Deixe essa janela aberta enquanto usar o DPS.
 5. Abra/recarregue o HunTera nos dois navegadores.
 6. No primeiro acesso, clique em `Criar nova PT`, informe o nome e uma senha.

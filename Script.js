@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         DPS Counter (HunTera) - Cross Browser
+// @name         Huntera Party Analyzer
 // @namespace    huntera-dps-counter-local
 // @version      3.0
-// @description  DPS de ate 4 personagens, compartilhado por uma party autenticada.
+// @description  Analise de dano e experiencia de ate 4 personagens em uma party.
 // @match        https://huntera.com.br/game*
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
@@ -413,7 +413,7 @@
   function header() {
     panel.innerHTML =
       '<div class="head">' +
-        '<span class="title">⚔️ Damage Done</span>' +
+        '<span class="title">⚔️ Huntera Party Analyzer</span>' +
         '<span class="status off">OFFLINE</span>' +
         '<button class="btn" data-a="party" title="Trocar ou criar PT">♟</button>' +
         '<button class="btn" data-a="big" title="Modo grande">⛶</button>' +
