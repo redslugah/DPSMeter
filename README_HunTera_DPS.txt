@@ -12,6 +12,24 @@ DEPLOY NO RENDER
 5. No `Script.js`, troque `https://SEU-APP.onrender.com` pela URL real do seu servico.
 6. Reinstale/atualize o userscript no Tampermonkey de todos os jogadores.
 
+AJUSTAR O TEMPO DE COMBATE
+O tempo sem dano antes de pausar o combate e configurado no Render:
+1. Abra o Web Service e entre em `Environment`.
+2. Adicione a variavel `COMBAT_TIMEOUT` com o valor em segundos.
+3. Salve e faca um novo deploy.
+
+Exemplos: `15` mantem o combate ativo por 15 segundos sem hit; `20` ou `30`
+podem ser usados se a party fizer pausas maiores. O padrao do servidor e 15.
+
+XP POR HORA
+O script reconhece automaticamente `Você ganhou 73 de experiência.` e
+`You gained 73 experience points.`. O painel mostra o XP acumulado e o XP/h
+de cada personagem.
+
+O tempo ativo usado no XP/h e independente do DPS. Para alterar, adicione no
+Render a variavel `XP_TIMEOUT`, tambem em segundos, e faca um novo deploy.
+Se nao for configurada, o padrao e 15 segundos.
+
 O servidor usa automaticamente a porta `PORT` fornecida pelo Render. O endpoint
 `/health` pode ser usado para verificar se ele esta funcionando.
 
@@ -40,8 +58,9 @@ IMPORTANTE
 - Reset zera a hunt, mas preserva os personagens cadastrados.
 - DPS principal = dano total / tempo de combate ativo.
 - DPS 10s = dano causado nos últimos 10 segundos / 10.
-- Combate fica como ativo enquanto houver pelo menos um hit da party nos últimos 5 segundos.
-- Pausas maiores que 5s não entram no tempo ativo.
+- Combate fica como ativo enquanto houver pelo menos um hit da party dentro do
+   valor configurado em `COMBAT_TIMEOUT`.
+- Pausas maiores que esse valor não entram no tempo ativo.
 - "Pausado" não apaga o dano; apenas indica que não houve hit recente.
 
 SE python NAO EXISTIR

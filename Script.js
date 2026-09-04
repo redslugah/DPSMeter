@@ -6,19 +6,19 @@
 // @match        https://huntera.com.br/game*
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
-// @connect      *.onrender.com
+// @connect      hunteradpsmeter.onrender.com
 // ==/UserScript==
 
 (function () {
   "use strict";
 
   // Substitua pelo endereco do seu Web Service no Render.
-  var API = "https://SEU-APP.onrender.com";
+  var API = "https://hunteradpsmeter.onrender.com";
   var STALE_MS = 15000;
   var POLL_MS = 1000;
   var HEARTBEAT_MS = 5000;
   var ROLLING_WINDOW = 10;
-  var COMBAT_TIMEOUT = 5;
+  var COMBAT_TIMEOUT = 15;
   var NAME_KEY = "hunta-dps-name-v2";
   var VOC_KEY = "hunta-dps-voc-v2";
   var TABID_KEY = "hunta-dps-tabid-v2";
@@ -82,7 +82,8 @@
       url: API + path,
       headers: headers,
       data: body ? JSON.stringify(body) : undefined,
-      timeout: 2500,
+      // O plano gratuito do Render pode levar alguns segundos para acordar.
+      timeout: 15000,
 
       onload: function (r) {
         var data = null;
@@ -94,8 +95,10 @@
         callback(null, r.status, data);
       },
 
-      onerror: function () {
-        callback(new Error("API offline"));
+      onerror: function (details) {
+        var error = new Error("API offline");
+        error.details = details;
+        callback(error);
       },
 
       ontimeout: function () {
@@ -257,13 +260,17 @@
       var name = nameInput.value.trim();
       var password = passwordInput.value;
       error.textContent = "";
+      setStatus("CONECTANDO", "off");
 
       request("POST", path, {
         party_name: name,
         password: password
       }, function (err, status, data) {
         if (err) {
-          error.textContent = "Servidor indisponível.";
+          error.textContent = err.message === "API timeout"
+            ? "Tempo esgotado. O Render pode estar acordando; tente novamente."
+            : "Falha de acesso ao Render. Confira as permissões do Tampermonkey.";
+          setStatus("ERRO API", "err");
           return;
         }
         if (status !== 200 && status !== 201) {
@@ -479,6 +486,7 @@
         voc: c.voc || "",
         damage: Number(c.damage) || 0,
         maxHit: Number(c.maxHit) || 0,
+        xp: Number(c.xp) || 0,
         lastSeen: Number(c.lastSeen) || 0,
         rolling10sDps: Number(c.rolling10sDps) || 0
       };
@@ -560,6 +568,11 @@
           ? c.damage / data.activeSeconds
           : 0;
 
+      var xph =
+        data.xpActiveSeconds > 0
+          ? c.xp / data.xpActiveSeconds * 3600
+          : 0;
+
       var tag = voc
         ? " [" + voc.key + "]"
         : "";
@@ -606,6 +619,8 @@
               fmt(c.rolling10sDps) +
               '/s · Maior: ' +
               fmt(c.maxHit) +
+              ' · XP/h: ' +
+              fmt(xph) +
               ' · ' +
               share +
               '%' +
@@ -725,21 +740,96 @@
     );
   }
 
+  function sendXp(amount) {
+    if (viewerOnly || !registered || !partyToken) {
+      return;
+    }
+
+    request(
+      "POST",
+      "/xp",
+      {
+        client_id: tabId,
+        amount: amount,
+        ts: Date.now()
+      },
+      function (err, status) {
+        if (status === 409) {
+          registered = false;
+          register();
+        }
+      }
+    );
+  }
+
   // =========================================================
   // COMBAT LOG
   // =========================================================
   //
-  // Formato em inglês:
+  // Formatos aceitos:
   //
   // You hit <target> for 123.
   // You hit <target> for 1.234.
   // You hit <target> for 12.345.
   // You hit <target> for 123.456.
+  // Você acertou <target> causando 123.456.
   //
   // O ponto é tratado como separador de milhares.
   //
-  var DEALT_RE =
-    /^You hit .+ for (\d{1,3}(?:\.\d{3})*)/;
+  var DEALT_PATTERNS = [
+    {
+      language: "en",
+      regex: /^You hit .+ for (\d{1,3}(?:\.\d{3})*)/
+    },
+    {
+      language: "pt",
+      regex: /^Você acertou .+ causando (\d{1,3}(?:\.\d{3})*)/
+    }
+  ];
+
+  var XP_PATTERNS = [
+    /^Você ganhou (\d{1,3}(?:\.\d{3})*) de experiência\.?$/i,
+    /^You gained (\d{1,3}(?:\.\d{3})*) experience points\.?$/i
+  ];
+
+  var detectedCombatLanguage = null;
+
+  function matchDamage(text) {
+    var patterns = detectedCombatLanguage
+      ? DEALT_PATTERNS.filter(function (pattern) {
+          return pattern.language === detectedCombatLanguage;
+        })
+      : DEALT_PATTERNS;
+
+    for (var i = 0; i < patterns.length; i++) {
+      var match = patterns[i].regex.exec(text);
+
+      if (match) {
+        detectedCombatLanguage = patterns[i].language;
+        return match;
+      }
+    }
+
+    // Permite recuperar caso o idioma do jogo seja alterado durante a sessão.
+    if (detectedCombatLanguage) {
+      detectedCombatLanguage = null;
+      return matchDamage(text);
+    }
+
+    return null;
+  }
+
+  function matchXp(text) {
+    for (var i = 0; i < XP_PATTERNS.length; i++) {
+      var match = XP_PATTERNS[i].exec(text);
+
+      if (match) {
+        return match;
+      }
+    }
+
+    return null;
+  }
 
   function handleLine(node) {
     if (
@@ -752,13 +842,6 @@
 
     seenNodes.add(node);
 
-    if (
-      node.getAttribute("data-category") !==
-      "damage"
-    ) {
-      return;
-    }
-
     var span =
       node.querySelector(".combat-text");
 
@@ -769,8 +852,25 @@
     var text =
       (span.textContent || "").trim();
 
+    var xpMatch =
+      matchXp(text);
+
+    if (xpMatch) {
+      var xp =
+        parseInt(
+          xpMatch[1].replace(/\./g, ""),
+          10
+        ) || 0;
+
+      if (xp > 0) {
+        sendXp(xp);
+      }
+
+      return;
+    }
+
     var m =
-      DEALT_RE.exec(text);
+      matchDamage(text);
 
     if (!m) {
       return;
@@ -830,7 +930,7 @@
     combatObserver = mo;
 
     console.log(
-      "[hunta-dps] English combat observer attached"
+      "[hunta-dps] Combat observer attached"
     );
   }
 
@@ -981,6 +1081,8 @@
             localStorage.removeItem(PARTY_TOKEN_KEY);
             registered = false;
             showPartySetup();
+            setStatus("PT NÃO CONECTADA", "off");
+            return;
           }
 
           setStatus(
