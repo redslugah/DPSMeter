@@ -71,6 +71,8 @@ O `Script.js` ja esta configurado para usar o Web Service publico. Nao altere es
 var API = "https://hunterapartyanalyzer.onrender.com";
 ```
 
+O token de acesso da party e armazenado pelo Tampermonkey usando `GM_setValue`. Instalacoes antigas que ainda tenham o token no `localStorage` fazem uma migracao automatica na primeira abertura.
+
 ## Primeira configuracao
 
 Ao abrir o jogo pela primeira vez, o painel pedira os dados da party.
@@ -111,6 +113,8 @@ Tambem e possivel escolher **So visualizar**. Esse modo mostra os dados da party
 - O botao de party permite trocar de party ou criar outra.
 - O botao de renomear permite alterar o personagem e a vocacao da aba atual.
 - O painel pode ser arrastado e possui um modo grande para facilitar a visualizacao.
+- A visao principal mostra o nome/vocacao, dano, DPS e XP/h de cada personagem, alem do dano e XP totais da party.
+- Clique em um personagem para abrir os detalhes completos, incluindo maior hit e DPS dos ultimos 10 segundos. Use **Voltar para a PT** para retornar ao ranking.
 
 O script reconhece mensagens de dano em portugues e ingles:
 
@@ -138,6 +142,8 @@ O calculo de XP/h usa um tempo ativo separado, tambem com padrao de 15 segundos 
 - O servidor atual mantem parties, personagens e eventos em memoria.
 - Um reinicio, novo deploy ou periodo de inatividade do Render pode apagar os dados das parties.
 - O plano gratuito do Render pode levar alguns segundos para acordar. Na primeira tentativa, aguarde e tente novamente se aparecer timeout.
+- Parties sem atividade por 4 dias sao removidas automaticamente. Isso tambem invalida o token correspondente.
+- O servidor limita a quantidade de parties e de eventos mantidos na janela de 15 minutos. Em uma hunt normal, esses limites nao alteram o calculo; em caso de excesso anormal, novos eventos podem ser recusados temporariamente com status `429`.
 - A party e compartilhada por nome e senha. Use uma senha que voce possa distribuir apenas para os jogadores da sua PT.
 - O script envia eventos de dano e XP, mas nao envia a senha da party nas requisicoes de estado, dano ou experiencia.
 

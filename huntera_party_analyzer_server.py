@@ -15,16 +15,26 @@ MAX_CHARS = 4
 COMBAT_TIMEOUT = float(os.environ.get("COMBAT_TIMEOUT", "15"))
 XP_TIMEOUT = float(os.environ.get("XP_TIMEOUT", "15"))
 EVENT_RETENTION = 15 * 60  # keep 15 min of hit timestamps for rolling DPS / timer
+MAX_PARTIES = int(os.environ.get("MAX_PARTIES", "500"))
+PARTY_IDLE_TIMEOUT = float(os.environ.get("PARTY_IDLE_TIMEOUT", str(4 * 24 * 60 * 60)))
+MAX_EVENTS_PER_PARTY = int(os.environ.get("MAX_EVENTS_PER_PARTY", "10000"))
+MAX_EVENTS_PER_CHAR = int(os.environ.get("MAX_EVENTS_PER_CHAR", "3000"))
+RATE_LIMIT_WINDOW = 60
+CREATE_LIMIT_PER_IP = 5
+CONNECT_LIMIT_PER_IP = 20
 
 state_lock = Lock()
 parties = {}
+rate_limits = {"create": {}, "connect": {}}
 
 def now_ms():
     return int(time.time() * 1000)
 
 def new_party():
+    timestamp = now_ms()
     return {
-        "resetAt": now_ms(),
+        "resetAt": timestamp,
+        "lastActivity": timestamp,
         "chars": {},
         "events": [],
         "xp_events": [],
@@ -107,10 +117,44 @@ def rolling_damage(party, cid, now, window=10.0):
 def password_hash(password, salt):
     return hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1).hex()
 
+def cleanup_parties(now=None):
+    if now is None:
+        now = now_ms()
+    cutoff = now - int(PARTY_IDLE_TIMEOUT * 1000)
+    expired = [
+        token for token, party in parties.items()
+        if party.get("lastActivity", party["resetAt"]) < cutoff
+    ]
+    for token in expired:
+        del parties[token]
+
+def allow_rate(ip, action, limit, now=None):
+    if now is None:
+        now = time.time()
+    entries = rate_limits[action].setdefault(ip, [])
+    cutoff = now - RATE_LIMIT_WINDOW
+    entries[:] = [timestamp for timestamp in entries if timestamp > cutoff]
+    if len(entries) >= limit:
+        return False
+    entries.append(now)
+    return True
+
+def event_capacity_available(party, events, cid, limit):
+    if len(events) >= MAX_EVENTS_PER_PARTY:
+        return False
+    return sum(1 for event in events if event["cid"] == cid) < limit
+
 def auth_party(handler):
     token = handler.headers.get("X-Party-Token", "")
     party = parties.get(token)
-    return party if party else None
+    if not party:
+        return None
+    now = now_ms()
+    if now - party.get("lastActivity", party["resetAt"]) > PARTY_IDLE_TIMEOUT * 1000:
+        del parties[token]
+        return None
+    party["lastActivity"] = now
+    return party
 
 def party_payload(party):
     payload = build_state(party)
@@ -155,11 +199,11 @@ class Handler(BaseHTTPRequestHandler):
             send_json(self, 200, {"ok": True, "service": "huntera-party-analyzer", "port": PORT})
             return
         if path == "/state":
-            party = auth_party(self)
-            if not party:
-                send_json(self, 401, {"error": "party_auth_required"})
-                return
             with state_lock:
+                party = auth_party(self)
+                if not party:
+                    send_json(self, 401, {"error": "party_auth_required"})
+                    return
                 send_json(self, 200, party_payload(party))
             return
         send_json(self, 404, {"error": "not found"})
@@ -173,10 +217,17 @@ class Handler(BaseHTTPRequestHandler):
 
         with state_lock:
             if path == "/party/create":
+                cleanup_parties()
+                if not allow_rate(self.client_address[0], "create", CREATE_LIMIT_PER_IP):
+                    send_json(self, 429, {"error": "rate_limit"})
+                    return
                 name = str(data.get("party_name", "")).strip()[:40]
                 password = str(data.get("password", ""))
                 if len(name) < 2 or len(password) < 4:
                     send_json(self, 400, {"error": "party name and password are required"})
+                    return
+                if len(parties) >= MAX_PARTIES:
+                    send_json(self, 503, {"error": "party_capacity"})
                     return
                 for existing in parties.values():
                     if existing["name"].casefold() == name.casefold():
@@ -193,6 +244,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/party/connect":
+                cleanup_parties()
+                if not allow_rate(self.client_address[0], "connect", CONNECT_LIMIT_PER_IP):
+                    send_json(self, 429, {"error": "rate_limit"})
+                    return
                 name = str(data.get("party_name", "")).strip()
                 password = str(data.get("password", ""))
                 for token, party in parties.items():
@@ -200,6 +255,7 @@ class Handler(BaseHTTPRequestHandler):
                             secrets.compare_digest(
                                 password_hash(password, bytes.fromhex(party["salt"])),
                                 party["password_hash"])):
+                        party["lastActivity"] = now_ms()
                         send_json(self, 200, {"party_name": party["name"], "party_token": token})
                         return
                 send_json(self, 401, {"error": "invalid_party_credentials"})
@@ -248,13 +304,16 @@ class Handler(BaseHTTPRequestHandler):
                 if damage <= 0 or damage > 10**12:
                     send_json(self, 400, {"error": "invalid_damage"})
                     return
+                clean_events(party, now)
+                if not event_capacity_available(party, party["events"], cid, MAX_EVENTS_PER_CHAR):
+                    send_json(self, 429, {"error": "event_capacity"})
+                    return
                 c = party["chars"][cid]
                 c["damage"] += damage
                 c["maxHit"] = max(c["maxHit"], damage)
                 c["lastSeen"] = now
                 c["lastHit"] = ts
                 party["events"].append({"cid": cid, "damage": damage, "ts": ts})
-                clean_events(party, now)
                 send_json(self, 200, {"ok": True})
                 return
 
@@ -273,10 +332,13 @@ class Handler(BaseHTTPRequestHandler):
                 if amount <= 0 or amount > 10**9:
                     send_json(self, 400, {"error": "invalid_xp"})
                     return
+                clean_events(party, now)
+                if not event_capacity_available(party, party["xp_events"], cid, MAX_EVENTS_PER_CHAR):
+                    send_json(self, 429, {"error": "event_capacity"})
+                    return
                 party["chars"][cid]["xp"] = party["chars"][cid].get("xp", 0) + amount
                 party["chars"][cid]["lastSeen"] = now
                 party["xp_events"].append({"cid": cid, "amount": amount, "ts": ts})
-                clean_events(party, now)
                 send_json(self, 200, {"ok": True})
                 return
 

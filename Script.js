@@ -1,11 +1,14 @@
 // ==UserScript==
 // @name         Huntera Party Analyzer
 // @namespace    huntera-party-analyzer
-// @version      3.1
+// @version      3.6
 // @description  Analise de dano e experiencia de ate 4 personagens em uma party.
 // @match        https://huntera.com.br/game*
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
 // @connect      hunterapartyanalyzer.onrender.com
 // ==/UserScript==
 
@@ -58,7 +61,16 @@
   var myName = localStorage.getItem(NAME_KEY) || "";
   var myVoc = localStorage.getItem(VOC_KEY) || "";
   var partyName = localStorage.getItem(PARTY_NAME_KEY) || "";
-  var partyToken = localStorage.getItem(PARTY_TOKEN_KEY) || "";
+  var partyToken = GM_getValue(PARTY_TOKEN_KEY, "") || "";
+
+  if (!partyToken) {
+    partyToken = localStorage.getItem(PARTY_TOKEN_KEY) || "";
+    if (partyToken) {
+      GM_setValue(PARTY_TOKEN_KEY, partyToken);
+      localStorage.removeItem(PARTY_TOKEN_KEY);
+    }
+  }
+
   var viewerOnly = localStorage.getItem(VIEWER_KEY) === "1";
   var bigMode = localStorage.getItem(BIG_KEY) === "1";
 
@@ -67,6 +79,7 @@
   var latestState = null;
   var combatObserver = null;
   var seenNodes = new WeakSet();
+  var selectedCharacterId = null;
 
   function request(method, path, body, callback) {
     var headers = {
@@ -157,27 +170,31 @@
 
     ".body{padding:8px 9px}",
 
-    ".summary{font-size:9px;color:#9da8b5;margin:0 2px 6px;display:flex;justify-content:space-between}",
+    ".summary{font-size:9px;color:#9da8b5;margin:0 2px 6px;display:flex;justify-content:space-between;gap:12px}",
+
+    ".summary-meta,.summary-totals{display:flex;flex-direction:column;gap:2px}.summary-totals{text-align:right;color:#eef2f6;font-weight:700}.summary-totals span{white-space:nowrap}",
 
     ".rows{display:flex;flex-direction:column;gap:5px}",
 
-    ".row{position:relative;border-radius:6px;overflow:hidden;background:rgba(4,7,12,.5);border:1px solid rgba(255,255,255,.06)}",
+    ".row{position:relative;border-radius:6px;overflow:hidden;background:rgba(4,7,12,.5);border:1px solid rgba(255,255,255,.06);cursor:pointer}.row:focus-visible{outline:2px solid #6fd8f0;outline-offset:1px}",
 
     ".row.stale{opacity:.45}.fill{position:absolute;inset:0;height:100%;border-radius:6px;opacity:.75;transition:width .3s ease}",
 
-    ".content{position:relative;display:flex;align-items:center;padding:6px 8px;gap:6px;text-shadow:0 1px 2px rgba(0,0,0,.85)}",
+    ".content{position:relative;display:flex;align-items:flex-start;padding:6px 8px;gap:6px;text-shadow:0 1px 2px rgba(0,0,0,.85)}",
 
-    ".rank{opacity:.75;width:12px;font-size:11px;font-weight:600;align-self:flex-start;margin-top:1px}",
+    ".rank{opacity:.75;width:12px;flex:0 0 12px;font-size:11px;font-weight:600;line-height:1.2;margin-top:0}",
 
     ".main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}",
 
-    ".top{display:flex;align-items:baseline;gap:6px}.name{flex:1;min-width:0;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.value{font-size:11px;font-weight:700;white-space:nowrap}",
+    ".top{display:flex;align-items:flex-start;gap:6px}.name{flex:1;min-width:0;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.value{font-size:11px;font-weight:700;white-space:nowrap}.value-xp{font-size:11px;font-weight:700;color:#d6e4ec;white-space:nowrap}",
 
-    ".sub{font-size:9px;font-weight:500;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+    ".sub{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:9px;font-weight:500;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sub-metrics{min-width:0;overflow:hidden;text-overflow:ellipsis}",
+
+    ".detail{display:flex;flex-direction:column;gap:10px}.detail-back{align-self:flex-start;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#eef2f6;border-radius:6px;padding:5px 8px;cursor:pointer;font-size:10px;font-weight:600}.detail-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.detail-name{font-size:14px;font-weight:700;color:#eef2f6}.detail-voc{font-size:10px;color:#9da8b5}.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}.detail-stat{padding:7px 8px;background:rgba(4,7,12,.5);border:1px solid rgba(255,255,255,.06);border-radius:6px}.detail-label{display:block;color:#9da8b5;font-size:9px}.detail-value{display:block;color:#eef2f6;font-size:12px;font-weight:700;margin-top:2px}",
 
     ".setup{display:flex;gap:6px;align-items:center}.setup input,.setup select,.party-setup input{min-width:0;background:rgba(4,7,12,.55);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#eef2f6;font-size:11px;padding:5px 6px;font-family:inherit}.setup input{flex:1}.setup button,.party-actions button{border:1px solid rgba(255,255,255,.12);background:#2f6aa3;color:#fff;border-radius:6px;padding:5px 8px;cursor:pointer;font-size:11px;font-weight:600}.party-setup{display:flex;flex-direction:column;gap:6px}.party-setup input{width:100%}.party-actions{display:flex;gap:6px}.party-actions button{flex:1}.viewer{font-size:10px;color:#8fb8d6;text-decoration:underline;cursor:pointer;margin-top:7px}.empty{text-align:center;color:#8b95a3;font-size:10px;padding:8px}.error{text-align:center;color:#e8a44e;font-size:10px;padding:8px;min-height:12px}",
 
-    ".panel.big .title{font-size:18px}.panel.big .status{font-size:12px}.panel.big .btn{font-size:18px}.panel.big .body{padding:12px}.panel.big .row{border-radius:9px}.panel.big .content{padding:9px 14px}.panel.big .rank{font-size:16px;width:22px}.panel.big .name,.panel.big .value{font-size:16px}.panel.big .sub{font-size:12px}.panel.big .summary{font-size:11px}"
+    ".panel.big .title{font-size:18px}.panel.big .status{font-size:12px}.panel.big .btn{font-size:18px}.panel.big .body{padding:12px}.panel.big .row{border-radius:9px}.panel.big .content{padding:9px 14px}.panel.big .rank{font-size:16px;width:22px}.panel.big .name,.panel.big .value,.panel.big .value-xp{font-size:16px}.panel.big .sub{font-size:12px}.panel.big .summary{font-size:11px}"
 
   ].join("");
 
@@ -283,7 +300,8 @@
         partyName = data.party_name;
         partyToken = data.party_token;
         localStorage.setItem(PARTY_NAME_KEY, partyName);
-        localStorage.setItem(PARTY_TOKEN_KEY, partyToken);
+        GM_setValue(PARTY_TOKEN_KEY, partyToken);
+        localStorage.removeItem(PARTY_TOKEN_KEY);
         nameSetupOpen = false;
         registered = false;
         render(latestState || { chars: {}, activeSeconds: 0 });
@@ -497,6 +515,10 @@
       return b.damage - a.damage;
     });
 
+    if (selectedCharacterId && !chars[selectedCharacterId]) {
+      selectedCharacterId = null;
+    }
+
     if (!myName && !viewerOnly) {
       showSetup();
       return;
@@ -526,12 +548,14 @@
 
     var summary =
       '<div class="summary">' +
-        '<span>Tempo ativo: ' +
-          fmtTime(data.activeSeconds || 0) +
-        '</span>' +
-        '<span>Janela: ' +
-          ROLLING_WINDOW +
-          's</span>' +
+        '<div class="summary-meta">' +
+          '<span>Tempo ativo: ' +
+            fmtTime(data.activeSeconds || 0) +
+          '</span>' +
+          '<span>Janela: ' +
+            ROLLING_WINDOW +
+            's</span>' +
+        '</div>' +
       '</div>';
 
     if (!list.length) {
@@ -542,6 +566,49 @@
       return;
     }
 
+    if (selectedCharacterId) {
+      var selected = list.find(function (character) {
+        return character.id === selectedCharacterId;
+      });
+
+      if (selected) {
+        var selectedVoc = VOC_BY_KEY[selected.voc];
+        var selectedDps = data.activeSeconds > 0
+          ? selected.damage / data.activeSeconds
+          : 0;
+        var selectedXph = data.xpActiveSeconds > 0
+          ? selected.xp / data.xpActiveSeconds * 3600
+          : 0;
+        var selectedShare = total
+          ? Math.round(selected.damage / total * 100)
+          : 0;
+        var detail = document.createElement("div");
+        detail.className = "detail";
+        detail.innerHTML =
+          '<button class="detail-back" type="button">← Voltar para a PT</button>' +
+          '<div class="detail-heading">' +
+            '<span class="detail-name">' + esc(selected.name) + '</span>' +
+            '<span class="detail-voc">' + esc(selectedVoc ? selectedVoc.label : selected.voc) + '</span>' +
+          '</div>' +
+          '<div class="detail-grid">' +
+            '<div class="detail-stat"><span class="detail-label">Dano total</span><span class="detail-value">' + fmt(selected.damage) + '</span></div>' +
+            '<div class="detail-stat"><span class="detail-label">Participacao</span><span class="detail-value">' + selectedShare + '%</span></div>' +
+            '<div class="detail-stat"><span class="detail-label">DPS principal</span><span class="detail-value">' + fmt(selectedDps) + '/s</span></div>' +
+            '<div class="detail-stat"><span class="detail-label">DPS ultimos 10s</span><span class="detail-value">' + fmt(selected.rolling10sDps) + '/s</span></div>' +
+            '<div class="detail-stat"><span class="detail-label">Maior hit</span><span class="detail-value">' + fmt(selected.maxHit) + '</span></div>' +
+            '<div class="detail-stat"><span class="detail-label">XP total</span><span class="detail-value">' + fmt(selected.xp) + '</span></div>' +
+            '<div class="detail-stat"><span class="detail-label">XP por hora</span><span class="detail-value">' + fmt(selectedXph) + '</span></div>' +
+          '</div>';
+        body.innerHTML = summary;
+        body.appendChild(detail);
+        detail.querySelector(".detail-back").addEventListener("click", function () {
+          selectedCharacterId = null;
+          render(latestState);
+        });
+        return;
+      }
+    }
+
     var rows = document.createElement("div");
     rows.className = "rows";
 
@@ -550,10 +617,6 @@
         2,
         Math.round(c.damage / max * 100)
       );
-
-      var share = total
-        ? Math.round(c.damage / total * 100)
-        : 0;
 
       var stale = now - c.lastSeen > STALE_MS;
 
@@ -582,6 +645,9 @@
       row.className =
         "row" +
         (stale ? " stale" : "");
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-label", "Ver detalhes de " + c.name);
 
       row.innerHTML =
         '<div class="fill" style="width:' +
@@ -606,24 +672,21 @@
                 esc(tag) +
               '</span>' +
 
-              '<span class="value">' +
+              '<span class="value">Dano: ' +
                 fmt(c.damage) +
               '</span>' +
 
             '</div>' +
 
             '<div class="sub">' +
-              'DPS: ' +
-              fmt(dps) +
-              '/s · Últimos 10s: ' +
-              fmt(c.rolling10sDps) +
-              '/s · Maior: ' +
-              fmt(c.maxHit) +
-              ' · XP/h: ' +
-              fmt(xph) +
-              ' · ' +
-              share +
-              '%' +
+              '<span class="sub-metrics">DPS: ' +
+                fmt(dps) +
+                ' · XP/h: ' +
+                fmt(xph) +
+              '</span>' +
+              '<span class="value-xp">Exp: ' +
+                fmt(c.xp) +
+              '</span>' +
             '</div>' +
 
           '</div>' +
@@ -631,6 +694,19 @@
         '</div>';
 
       rows.appendChild(row);
+
+      function openDetails() {
+        selectedCharacterId = c.id;
+        render(latestState);
+      }
+
+      row.addEventListener("click", openDetails);
+      row.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openDetails();
+        }
+      });
     });
 
     body.innerHTML = summary;
@@ -1083,6 +1159,7 @@
             }
 
             partyToken = "";
+            GM_deleteValue(PARTY_TOKEN_KEY);
             localStorage.removeItem(PARTY_TOKEN_KEY);
             registered = false;
             showPartySetup();
