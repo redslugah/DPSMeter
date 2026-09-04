@@ -112,6 +112,7 @@ Tambem e possivel escolher **So visualizar**. Esse modo mostra os dados da party
 - O botao de reset zera os dados da hunt atual, mas preserva os personagens cadastrados.
 - O botao de party permite trocar de party ou criar outra.
 - O botao de renomear permite alterar o personagem e a vocacao da aba atual.
+- O botao de exportacao copia um JSON com os dados atuais da party e de todos os personagens para o clipboard.
 - O painel pode ser arrastado e possui um modo grande para facilitar a visualizacao.
 - A visao principal mostra o nome/vocacao, dano, DPS e XP/h de cada personagem, alem do dano e XP totais da party.
 - Clique em um personagem para abrir os detalhes completos, incluindo maior hit e DPS dos ultimos 10 segundos. Use **Voltar para a PT** para retornar ao ranking.

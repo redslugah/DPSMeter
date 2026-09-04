@@ -20,7 +20,6 @@
   var STALE_MS = 15000;
   var POLL_MS = 1000;
   var HEARTBEAT_MS = 5000;
-  var ROLLING_WINDOW = 10;
   var COMBAT_TIMEOUT = 15;
   var NAME_KEY = "hunta-dps-name-v2";
   var VOC_KEY = "hunta-dps-voc-v2";
@@ -435,6 +434,7 @@
         '<span class="status off">OFFLINE</span>' +
         '<button class="btn" data-a="party" title="Trocar ou criar PT">♟</button>' +
         '<button class="btn" data-a="big" title="Modo grande">⛶</button>' +
+        '<button class="btn" data-a="export" title="Exportar dados da PT">⇩</button>' +
         '<button class="btn" data-a="reset" title="Resetar contagem">↺</button>' +
         '<button class="btn" data-a="rename" title="Renomear">✎</button>' +
       '</div>' +
@@ -463,6 +463,11 @@
       showPartySetup();
     });
 
+    panel.querySelector('[data-a="export"]').addEventListener(
+      "click",
+      exportPartyData
+    );
+
     panel.querySelector('[data-a="reset"]').addEventListener(
       "click",
       resetFight
@@ -478,6 +483,63 @@
   }
 
   header();
+
+  function exportPartyData() {
+    if (!latestState) {
+      setStatus("SEM DADOS", "off");
+      return;
+    }
+
+    var exportData = {
+      exportedAt: new Date().toISOString(),
+      partyName: partyName,
+      resetAt: latestState.resetAt || null,
+      fightStartedAt: latestState.fightStartedAt || null,
+      lastHitAt: latestState.lastHitAt || null,
+      activeSeconds: latestState.activeSeconds || 0,
+      xpActiveSeconds: latestState.xpActiveSeconds || 0,
+      combatActive: Boolean(latestState.combatActive),
+      characters: latestState.chars || {}
+    };
+    var json = JSON.stringify(exportData, null, 2);
+
+    function copied() {
+      setStatus("EXPORTADO", "on");
+      setTimeout(function () {
+        render(latestState);
+      }, 1500);
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(json).then(copied).catch(function () {
+        copyWithFallback(json, copied);
+      });
+      return;
+    }
+
+    copyWithFallback(json, copied);
+  }
+
+  function copyWithFallback(text, callback) {
+    var textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    var copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch (e) {}
+
+    textarea.remove();
+    setStatus(copied ? "EXPORTADO" : "ERRO COPIA", copied ? "on" : "err");
+    if (copied) {
+      callback();
+    }
+  }
 
   function render(data) {
     if (!data) {
@@ -552,9 +614,6 @@
           '<span>Tempo ativo: ' +
             fmtTime(data.activeSeconds || 0) +
           '</span>' +
-          '<span>Janela: ' +
-            ROLLING_WINDOW +
-            's</span>' +
         '</div>' +
       '</div>';
 
