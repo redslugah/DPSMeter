@@ -12,7 +12,7 @@ import time
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8765"))
 MAX_CHARS = 4
-COMBAT_TIMEOUT = 5.0       # seconds without a hit before combat is considered ended
+COMBAT_TIMEOUT = float(os.environ.get("COMBAT_TIMEOUT", "15"))
 EVENT_RETENTION = 15 * 60  # keep 15 min of hit timestamps for rolling DPS / timer
 
 state_lock = Lock()
