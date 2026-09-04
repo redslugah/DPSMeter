@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Huntera Party Analyzer
 // @namespace    huntera-party-analyzer
-// @version      3.0
+// @version      3.1
 // @description  Analise de dano e experiencia de ate 4 personagens em uma party.
 // @match        https://huntera.com.br/game*
 // @run-at       document-end
@@ -789,7 +789,7 @@
 
   var XP_PATTERNS = [
     /^Você ganhou (\d{1,3}(?:\.\d{3})*) de experiência\.?$/i,
-    /^You gained (\d{1,3}(?:\.\d{3})*) experience points\.?$/i
+    /^You gained (\d{1,3}(?:,\d{3})*) experience points\.?$/i
   ];
 
   var detectedCombatLanguage = null;
@@ -858,7 +858,7 @@
     if (xpMatch) {
       var xp =
         parseInt(
-          xpMatch[1].replace(/\./g, ""),
+          xpMatch[1].replace(/[.,]/g, ""),
           10
         ) || 0;
 
@@ -1064,6 +1064,7 @@
   // =========================================================
 
   function poll() {
+    var requestPartyToken = partyToken;
 
     request(
       "GET",
@@ -1077,6 +1078,10 @@
           !data
         ) {
           if (status === 401) {
+            if (requestPartyToken !== partyToken) {
+              return;
+            }
+
             partyToken = "";
             localStorage.removeItem(PARTY_TOKEN_KEY);
             registered = false;
