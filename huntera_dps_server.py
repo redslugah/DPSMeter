@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""Relay for the HunTera DPS Counter, suitable for Render or local use."""
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse, parse_qs
+from threading import Lock
+import hashlib
+import json
+import os
+import secrets
+import time
+
+HOST = "0.0.0.0"
+PORT = int(os.environ.get("PORT", "8765"))
+MAX_CHARS = 4
+COMBAT_TIMEOUT = 5.0       # seconds without a hit before combat is considered ended
+EVENT_RETENTION = 15 * 60  # keep 15 min of hit timestamps for rolling DPS / timer
+
+state_lock = Lock()
+parties = {}
+
+def now_ms():
+    return int(time.time() * 1000)
+
+def new_party():
+    return {
+        "resetAt": now_ms(),
+        "chars": {},
+        "events": [],
+    }
+
+def clean_events(party, now=None):
+    if now is None:
+        now = now_ms()
+    cutoff = now - EVENT_RETENTION * 1000
+    party["events"] = [e for e in party["events"] if e["ts"] >= cutoff and e["ts"] >= party["resetAt"]]
+
+def combat_metrics(party, now=None):
+    if now is None:
+        now = now_ms()
+    events = sorted(party["events"], key=lambda e: e["ts"])
+    if not events:
+        return 0.0, False, None, None
+
+    active_ms = 0.0
+    prev = events[0]["ts"]
+    for e in events[1:]:
+        gap = max(0, e["ts"] - prev)
+        active_ms += min(gap, COMBAT_TIMEOUT * 1000)
+        prev = e["ts"]
+    active_ms += min(max(0, now - prev), COMBAT_TIMEOUT * 1000)
+
+    last = events[-1]["ts"]
+    active = (now - last) <= COMBAT_TIMEOUT * 1000
+    return active_ms / 1000.0, active, events[0]["ts"], last
+
+def build_state(party, now=None):
+    if now is None:
+        now = now_ms()
+    clean_events(party, now)
+    active_seconds, active, first_hit, last_hit = combat_metrics(party, now)
+    chars = {}
+    for cid, c in party["chars"].items():
+        chars[cid] = {
+            "name": c["name"],
+            "voc": c["voc"],
+            "damage": c["damage"],
+            "maxHit": c["maxHit"],
+            "lastSeen": c["lastSeen"],
+            "lastHit": c.get("lastHit", 0),
+        }
+    return {
+        "resetAt": party["resetAt"],
+        "chars": chars,
+        "fightStartedAt": first_hit,
+        "lastHitAt": last_hit,
+        "activeSeconds": active_seconds,
+        "combatActive": active,
+        "serverNow": now,
+        "maxChars": MAX_CHARS,
+    }
+
+def rolling_damage(party, cid, now, window=10.0):
+    cutoff = now - int(window * 1000)
+    return sum(e["damage"] for e in party["events"] if e["cid"] == cid and e["ts"] >= cutoff)
+
+def password_hash(password, salt):
+    return hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1).hex()
+
+def auth_party(handler):
+    token = handler.headers.get("X-Party-Token", "")
+    party = parties.get(token)
+    return party if party else None
+
+def party_payload(party):
+    payload = build_state(party)
+    now = payload["serverNow"]
+    for cid, c in payload["chars"].items():
+        rd = rolling_damage(party, cid, now, 10.0)
+        c["rolling10sDamage"] = rd
+        c["rolling10sDps"] = rd / 10.0
+    return payload
+
+def send_json(handler, status, payload):
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Access-Control-Allow-Headers", "Content-Type, X-Party-Token")
+    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    handler.end_headers()
+    handler.wfile.write(body)
+
+def read_json(handler):
+    try:
+        n = int(handler.headers.get("Content-Length", "0"))
+        if n > 10000:
+            return None
+        return json.loads(handler.rfile.read(n).decode("utf-8"))
+    except Exception:
+        return None
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        # Keep the console useful but quiet.
+        print(f"[{time.strftime('%H:%M:%S')}] {self.address_string()} {fmt % args}")
+
+    def do_OPTIONS(self):
+        send_json(self, 204, {})
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path == "/health":
+            send_json(self, 200, {"ok": True, "service": "huntera-dps", "port": PORT})
+            return
+        if path == "/state":
+            party = auth_party(self)
+            if not party:
+                send_json(self, 401, {"error": "party_auth_required"})
+                return
+            with state_lock:
+                send_json(self, 200, party_payload(party))
+            return
+        send_json(self, 404, {"error": "not found"})
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        data = read_json(self)
+        if not isinstance(data, dict):
+            send_json(self, 400, {"error": "invalid json"})
+            return
+
+        with state_lock:
+            if path == "/party/create":
+                name = str(data.get("party_name", "")).strip()[:40]
+                password = str(data.get("password", ""))
+                if len(name) < 2 or len(password) < 4:
+                    send_json(self, 400, {"error": "party name and password are required"})
+                    return
+                for existing in parties.values():
+                    if existing["name"].casefold() == name.casefold():
+                        send_json(self, 409, {"error": "party_exists"})
+                        return
+                token = secrets.token_urlsafe(32)
+                salt = secrets.token_bytes(16)
+                party = new_party()
+                party["name"] = name
+                party["salt"] = salt.hex()
+                party["password_hash"] = password_hash(password, salt)
+                parties[token] = party
+                send_json(self, 201, {"party_name": name, "party_token": token})
+                return
+
+            if path == "/party/connect":
+                name = str(data.get("party_name", "")).strip()
+                password = str(data.get("password", ""))
+                for token, party in parties.items():
+                    if (party["name"].casefold() == name.casefold() and
+                            secrets.compare_digest(
+                                password_hash(password, bytes.fromhex(party["salt"])),
+                                party["password_hash"])):
+                        send_json(self, 200, {"party_name": party["name"], "party_token": token})
+                        return
+                send_json(self, 401, {"error": "invalid_party_credentials"})
+                return
+
+            party = auth_party(self)
+            if not party:
+                send_json(self, 401, {"error": "party_auth_required"})
+                return
+
+            if path == "/register":
+                cid = str(data.get("client_id", ""))[:100]
+                name = str(data.get("name", "")).strip()[:40]
+                voc = str(data.get("voc", ""))[:3]
+                if not cid or not name:
+                    send_json(self, 400, {"error": "client_id and name are required"})
+                    return
+                if cid not in party["chars"] and len(party["chars"]) >= MAX_CHARS:
+                    send_json(self, 409, {"error": "max_chars", "maxChars": MAX_CHARS})
+                    return
+                old = party["chars"].get(cid)
+                party["chars"][cid] = {
+                    "name": name,
+                    "voc": voc,
+                    "damage": old["damage"] if old else 0,
+                    "maxHit": old["maxHit"] if old else 0,
+                    "lastSeen": now_ms(),
+                    "lastHit": old.get("lastHit", 0) if old else 0,
+                }
+                send_json(self, 200, party_payload(party))
+                return
+
+            if path == "/hit":
+                cid = str(data.get("client_id", ""))[:100]
+                try:
+                    damage = int(data.get("damage", 0))
+                    ts = int(data.get("ts", now_ms()))
+                except Exception:
+                    damage, ts = 0, now_ms()
+                now = now_ms()
+                ts = max(party["resetAt"], min(ts, now + 1000))
+                if cid not in party["chars"]:
+                    send_json(self, 409, {"error": "not_registered"})
+                    return
+                if damage <= 0 or damage > 10**12:
+                    send_json(self, 400, {"error": "invalid_damage"})
+                    return
+                c = party["chars"][cid]
+                c["damage"] += damage
+                c["maxHit"] = max(c["maxHit"], damage)
+                c["lastSeen"] = now
+                c["lastHit"] = ts
+                party["events"].append({"cid": cid, "damage": damage, "ts": ts})
+                clean_events(party, now)
+                send_json(self, 200, {"ok": True})
+                return
+
+            if path == "/heartbeat":
+                cid = str(data.get("client_id", ""))[:100]
+                if cid in party["chars"]:
+                    party["chars"][cid]["lastSeen"] = now_ms()
+                send_json(self, 200, {"ok": True})
+                return
+
+            if path == "/reset":
+                party["resetAt"] = now_ms()
+                party["events"] = []
+                # Preserve registered characters, but zero their fight stats.
+                for c in party["chars"].values():
+                    c["damage"] = 0
+                    c["maxHit"] = 0
+                    c["lastHit"] = 0
+                    c["lastSeen"] = party["resetAt"]
+                send_json(self, 200, party_payload(party))
+                return
+
+        send_json(self, 404, {"error": "not found"})
+
+if __name__ == "__main__":
+    print(f"HunTera DPS relay running at http://{HOST}:{PORT}")
+    print("Party data is held in memory. Keep this process running while using the DPS meter.")
+    print("Press Ctrl+C to stop.")
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

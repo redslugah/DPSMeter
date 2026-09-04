@@ -1,0 +1,52 @@
+HUNTERA DPS COUNTER 3.0 - CHROME + OPERA GX
+
+Arquivos:
+- HunTera_DPS_Counter.user.js -> instalar no Tampermonkey em Chrome e Opera GX.
+- huntera_dps_server.py -> servidor que compartilha o DPS entre ate 4 pessoas.
+
+DEPLOY NO RENDER
+1. Suba estes arquivos em um repositorio GitHub.
+2. No Render, crie um Web Service conectado ao repositorio.
+3. Use Runtime Python e o comando de start: `python huntera_dps_server.py`.
+4. O Render fornece uma URL parecida com `https://meu-dps.onrender.com`.
+5. No `Script.js`, troque `https://SEU-APP.onrender.com` pela URL real do seu servico.
+6. Reinstale/atualize o userscript no Tampermonkey de todos os jogadores.
+
+O servidor usa automaticamente a porta `PORT` fornecida pelo Render. O endpoint
+`/health` pode ser usado para verificar se ele esta funcionando.
+
+COMO USAR
+1. Instale Tampermonkey no Chrome e no Opera GX.
+2. No Tampermonkey de CADA navegador, crie um script novo e cole HunTera_DPS_Counter.user.js.
+3. No Windows, abra um Prompt de Comando/PowerShell na pasta dos arquivos e execute (modo local):
+   python huntera_dps_server.py
+4. Deixe essa janela aberta enquanto usar o DPS.
+5. Abra/recarregue o HunTera nos dois navegadores.
+6. No primeiro acesso, clique em `Criar nova PT`, informe o nome e uma senha.
+7. Nos outros navegadores, informe os mesmos dados e clique em `Conectar à PT`.
+8. Configure o nome e vocação de cada personagem.
+9. Clique no botao ↺ uma vez no começo da hunt para zerar a party.
+
+IMPORTANTE
+- Cada party tem nome e senha próprios. O servidor entrega um token aleatorio,
+   e as chamadas seguintes usam esse token.
+- O limite é de 4 personagens por party.
+- No Render gratuito, os dados ficam em memoria e podem ser perdidos se o servico
+   reiniciar ou dormir. O plano gratuito tambem pode demorar alguns segundos para
+   acordar no primeiro acesso.
+- O script usa GM_xmlhttpRequest para falar com a URL configurada do servidor.
+- O script foi ajustado para o log em inglês: "You hit ... for 1234".
+- Linhas antigas do combat log NÃO são reprocessadas ao recarregar a página, evitando duplicação.
+- Reset zera a hunt, mas preserva os personagens cadastrados.
+- DPS principal = dano total / tempo de combate ativo.
+- DPS 10s = dano causado nos últimos 10 segundos / 10.
+- Combate fica como ativo enquanto houver pelo menos um hit da party nos últimos 5 segundos.
+- Pausas maiores que 5s não entram no tempo ativo.
+- "Pausado" não apaga o dano; apenas indica que não houve hit recente.
+
+SE python NAO EXISTIR
+Instale Python 3 e marque a opcao "Add Python to PATH" durante a instalação.
+
+SE O WINDOWS PERGUNTAR SOBRE FIREWALL
+No modo local, o programa usa 127.0.0.1 (localhost). No Render, nao e necessario
+abrir portas no Windows.
