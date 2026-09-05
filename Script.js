@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Huntera Party Analyzer
 // @namespace    huntera-party-analyzer
-// @version      4.3
+// @version      4.4
 // @description  Analise de dano e experiencia de ate 4 personagens em uma party.
 // @homepageURL  https://github.com/redslugah/HunteraPartyAnalyzer
 // @updateURL    https://raw.githubusercontent.com/redslugah/HunteraPartyAnalyzer/main/Script.js
@@ -943,21 +943,23 @@
   // Formatos aceitos:
   //
   // You hit <target> for 123.
+  // Critical! You hit <target> for 123.
   // You hit <target> for 1.234.
   // You hit <target> for 12.345.
   // You hit <target> for 123.456.
   // Você acertou <target> causando 123.456.
+  // Crítico! Você acertou <target> causando 123.456.
   //
   // O ponto é tratado como separador de milhares.
   //
   var DEALT_PATTERNS = [
     {
       language: "en",
-      regex: /^You hit .+ for (\d{1,3}(?:\.\d{3})*)/
+      regex: /^(?:Critical!\s+)?You hit .+ for (\d{1,3}(?:[,.]\d{3})+|\d+)/i
     },
     {
       language: "pt",
-      regex: /^Você acertou .+ causando (\d{1,3}(?:\.\d{3})*)/
+      regex: /^(?:Crítico!\s+)?Você acertou .+ causando (\d{1,3}(?:[,.]\d{3})+|\d+)/i
     }
   ];
 
@@ -1052,7 +1054,7 @@
 
     var hit =
       parseInt(
-        m[1].replace(/\./g, ""),
+        m[1].replace(/[.,]/g, ""),
         10
       ) || 0;
 
