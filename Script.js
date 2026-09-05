@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Huntera Party Analyzer
 // @namespace    huntera-party-analyzer
-// @version      4.5
+// @version      4.6
 // @description  Analise de dano e experiencia de ate 4 personagens em uma party.
 // @homepageURL  https://github.com/redslugah/HunteraPartyAnalyzer
 // @updateURL    https://raw.githubusercontent.com/redslugah/HunteraPartyAnalyzer/main/Script.js
@@ -27,6 +27,7 @@
   var STALE_MS = 15000;
   var POLL_MS = 1000;
   var HEARTBEAT_MS = 5000;
+  var HEALTH_CHECK_MS = 60000;
   var COMBAT_TIMEOUT = 15;
   var NAME_KEY = "hunta-dps-name-v2";
   var VOC_KEY = "hunta-dps-voc-v2";
@@ -90,6 +91,32 @@
   var selectedCharacterId = null;
   var latestStateRequestId = 0;
   var reconnectInProgress = false;
+  var serverHealth = "unknown";
+
+  function debugLog(message, details) {
+    if (details === undefined) {
+      console.info("[Huntera Party Analyzer] " + message);
+      return;
+    }
+    console.info("[Huntera Party Analyzer] " + message, details);
+  }
+
+  function setServerHealth(status) {
+    if (serverHealth === status) {
+      return;
+    }
+    serverHealth = status;
+    var indicator = panel && panel.querySelector(".server-health");
+    if (indicator) {
+      indicator.className = "server-health " + status;
+      indicator.title = status === "online"
+        ? "Servidor online"
+        : status === "checking"
+          ? "Verificando servidor"
+          : "Servidor offline ou sem resposta";
+    }
+    debugLog("Saúde do servidor: " + status);
+  }
 
   function request(method, path, body, callback) {
     var headers = {
@@ -115,16 +142,21 @@
           data = JSON.parse(r.responseText);
         } catch (e) {}
 
+        if (r.status >= 400) {
+          debugLog("Resposta HTTP " + r.status + " em " + path);
+        }
         callback(null, r.status, data);
       },
 
       onerror: function (details) {
         var error = new Error("API offline");
         error.details = details;
+        debugLog("Erro de rede em " + path, details);
         callback(error);
       },
 
       ontimeout: function () {
+        debugLog("Timeout em " + path);
         callback(new Error("API timeout"));
       }
     });
@@ -192,6 +224,8 @@
     ".status{font-size:9px;font-weight:700;letter-spacing:.04em}",
 
     ".status.on{color:#4ee87a}.status.off{color:#e8a44e}.status.err{color:#e8544e}",
+
+    ".server-health{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:#8b95a3;box-shadow:0 0 0 2px rgba(139,149,163,.15)}.server-health.online{background:#4ee87a;box-shadow:0 0 0 2px rgba(78,232,122,.16)}.server-health.checking{background:#e8a44e;box-shadow:0 0 0 2px rgba(232,164,78,.16)}.server-health.offline{background:#e8544e;box-shadow:0 0 0 2px rgba(232,84,78,.16)}",
 
     ".btn{appearance:none;border:none;background:transparent;color:#aeb8c4;cursor:pointer;font-size:13px;line-height:1;padding:3px 5px;border-radius:5px}.btn:hover{background:rgba(255,255,255,.08);color:#fff}",
 
@@ -467,6 +501,7 @@
       '<div class="head">' +
         '<span class="title">⚔️ Huntera Party Analyzer</span>' +
         '<span class="status off">OFFLINE</span>' +
+      '<span class="server-health checking" title="Verificando servidor"></span>' +
         '<button class="btn" data-a="party" title="Trocar ou criar PT">♟</button>' +
         '<button class="btn" data-a="big" title="Modo grande">⛶</button>' +
         '<button class="btn" data-a="export" title="Exportar dados da PT">⇩</button>' +
@@ -518,6 +553,21 @@
   }
 
   header();
+
+  function checkServerHealth() {
+    setServerHealth("checking");
+    request("GET", "/health", null, function (err, status, data) {
+      if (!err && status === 200 && data && data.ok) {
+        setServerHealth("online");
+        return;
+      }
+      setServerHealth("offline");
+      debugLog("Health check sem resposta válida", {
+        status: status,
+        error: err ? err.message : null
+      });
+    });
+  }
 
   function exportPartyData() {
     if (!latestState) {
@@ -1266,6 +1316,10 @@
           !data
         ) {
           if (status === 401) {
+            debugLog("Estado da party rejeitado (401)", {
+              hasToken: Boolean(partyToken),
+              partyName: partyName
+            });
             if (requestPartyToken !== partyToken) {
               return;
             }
@@ -1307,6 +1361,7 @@
 
   function reconnectParty() {
     reconnectInProgress = true;
+    debugLog("Iniciando reconexão da party", { partyName: partyName });
     setStatus("RECONECTANDO", "off");
 
     request("POST", "/party/connect", {
@@ -1314,6 +1369,7 @@
       password: partyPassword
     }, function (err, status, data) {
       if (!err && status === 200 && data && data.party_token) {
+        debugLog("Party reconectada");
         partyToken = data.party_token;
         GM_setValue(PARTY_TOKEN_KEY, partyToken);
         registered = false;
@@ -1325,11 +1381,13 @@
       }
 
       if (!err && status === 401) {
+        debugLog("Party não encontrada; tentando recriar");
         request("POST", "/party/create", {
           party_name: partyName,
           password: partyPassword
         }, function (createErr, createStatus, createData) {
           if (!createErr && createStatus === 201 && createData && createData.party_token) {
+            debugLog("Party recriada após perda do estado do servidor");
             partyToken = createData.party_token;
             partyName = createData.party_name;
             GM_setValue(PARTY_TOKEN_KEY, partyToken);
@@ -1354,6 +1412,7 @@
   function finishReconnect(success) {
     reconnectInProgress = false;
     if (!success) {
+      debugLog("Reconexão falhou; aguardando ação do usuário");
       partyToken = "";
       GM_deleteValue(PARTY_TOKEN_KEY);
       localStorage.removeItem(PARTY_TOKEN_KEY);
@@ -1409,6 +1468,12 @@
   }
 
   waitForCombatLog();
+
+  checkServerHealth();
+  setInterval(
+    checkServerHealth,
+    HEALTH_CHECK_MS
+  );
 
   poll();
 
