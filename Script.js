@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Huntera Party Analyzer
 // @namespace    huntera-party-analyzer
-// @version      4.4
+// @version      4.5
 // @description  Analise de dano e experiencia de ate 4 personagens em uma party.
 // @homepageURL  https://github.com/redslugah/HunteraPartyAnalyzer
 // @updateURL    https://raw.githubusercontent.com/redslugah/HunteraPartyAnalyzer/main/Script.js
@@ -36,6 +36,7 @@
   var VIEWER_KEY = "hunta-dps-viewer-v2";
   var PARTY_NAME_KEY = "hunta-dps-party-name-v3";
   var PARTY_TOKEN_KEY = "hunta-dps-party-token-v3";
+  var PARTY_PASSWORD_KEY = "hunta-dps-party-password-v1";
 
   var VOCATIONS = [
     { key: "EK", label: "Knight", color: "#e8544e" },
@@ -67,6 +68,7 @@
   var myName = localStorage.getItem(NAME_KEY) || "";
   var myVoc = localStorage.getItem(VOC_KEY) || "";
   var partyName = localStorage.getItem(PARTY_NAME_KEY) || "";
+  var partyPassword = GM_getValue(PARTY_PASSWORD_KEY, "") || "";
   var partyToken = GM_getValue(PARTY_TOKEN_KEY, "") || "";
 
   if (!partyToken) {
@@ -87,6 +89,7 @@
   var seenNodes = new WeakSet();
   var selectedCharacterId = null;
   var latestStateRequestId = 0;
+  var reconnectInProgress = false;
 
   function request(method, path, body, callback) {
     var headers = {
@@ -328,7 +331,9 @@
 
         partyName = data.party_name;
         partyToken = data.party_token;
+        partyPassword = password;
         localStorage.setItem(PARTY_NAME_KEY, partyName);
+        GM_setValue(PARTY_PASSWORD_KEY, partyPassword);
         GM_setValue(PARTY_TOKEN_KEY, partyToken);
         localStorage.removeItem(PARTY_TOKEN_KEY);
         nameSetupOpen = false;
@@ -1265,6 +1270,11 @@
               return;
             }
 
+            if (partyName && partyPassword && !reconnectInProgress) {
+              reconnectParty();
+              return;
+            }
+
             partyToken = "";
             GM_deleteValue(PARTY_TOKEN_KEY);
             localStorage.removeItem(PARTY_TOKEN_KEY);
@@ -1293,6 +1303,64 @@
         render(data);
       }
     );
+  }
+
+  function reconnectParty() {
+    reconnectInProgress = true;
+    setStatus("RECONECTANDO", "off");
+
+    request("POST", "/party/connect", {
+      party_name: partyName,
+      password: partyPassword
+    }, function (err, status, data) {
+      if (!err && status === 200 && data && data.party_token) {
+        partyToken = data.party_token;
+        GM_setValue(PARTY_TOKEN_KEY, partyToken);
+        registered = false;
+        reconnectInProgress = false;
+        if (!viewerOnly && myName) {
+          register();
+        }
+        return;
+      }
+
+      if (!err && status === 401) {
+        request("POST", "/party/create", {
+          party_name: partyName,
+          password: partyPassword
+        }, function (createErr, createStatus, createData) {
+          if (!createErr && createStatus === 201 && createData && createData.party_token) {
+            partyToken = createData.party_token;
+            partyName = createData.party_name;
+            GM_setValue(PARTY_TOKEN_KEY, partyToken);
+            localStorage.setItem(PARTY_NAME_KEY, partyName);
+            registered = false;
+            reconnectInProgress = false;
+            if (!viewerOnly && myName) {
+              register();
+            }
+            return;
+          }
+
+          finishReconnect(false);
+        });
+        return;
+      }
+
+      finishReconnect(false);
+    });
+  }
+
+  function finishReconnect(success) {
+    reconnectInProgress = false;
+    if (!success) {
+      partyToken = "";
+      GM_deleteValue(PARTY_TOKEN_KEY);
+      localStorage.removeItem(PARTY_TOKEN_KEY);
+      registered = false;
+      showPartySetup();
+      setStatus("PT NÃO CONECTADA", "off");
+    }
   }
 
   // =========================================================

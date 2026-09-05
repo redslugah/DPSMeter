@@ -50,11 +50,14 @@ IMPORTANTE
    e as chamadas seguintes usam esse token.
 - O limite é de 4 personagens por party.
 - O token fica armazenado pelo Tampermonkey, separado do localStorage da pagina.
+- A senha da party tambem pode ficar armazenada pelo Tampermonkey para permitir reconexao automatica.
 - No Render gratuito, os dados ficam em memoria e podem ser perdidos se o servico
    reiniciar ou dormir. O plano gratuito tambem pode demorar alguns segundos para
    acordar no primeiro acesso.
 - Parties sem atividade por 4 dias e eventos acima dos limites de protecao podem
    ser removidos ou recusados. Esses limites nao afetam uma hunt normal.
+- Se o Render reiniciar e perder o estado em memoria, o script tenta recriar a
+   party automaticamente, mas os dados antigos so podem ser preservados com banco persistente externo.
 - O script usa GM_xmlhttpRequest para falar com a URL configurada do servidor.
 - O script foi ajustado para o log em inglês: "You hit ... for 1234".
 - Linhas antigas do combat log NÃO são reprocessadas ao recarregar a página, evitando duplicação.
