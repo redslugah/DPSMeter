@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Huntera Party Analyzer
 // @namespace    huntera-party-analyzer
-// @version      4.6
+// @version      4.7
 // @description  Analise de dano e experiencia de ate 4 personagens em uma party.
 // @homepageURL  https://github.com/redslugah/HunteraPartyAnalyzer
 // @updateURL    https://raw.githubusercontent.com/redslugah/HunteraPartyAnalyzer/main/Script.js
@@ -1359,9 +1359,13 @@
     );
   }
 
-  function reconnectParty() {
+  function reconnectParty(attempt) {
+    attempt = attempt || 0;
     reconnectInProgress = true;
-    debugLog("Iniciando reconexão da party", { partyName: partyName });
+    debugLog("Iniciando reconexão da party", {
+      partyName: partyName,
+      attempt: attempt + 1
+    });
     setStatus("RECONECTANDO", "off");
 
     request("POST", "/party/connect", {
@@ -1400,26 +1404,30 @@
             return;
           }
 
-          finishReconnect(false);
+          if (!createErr && createStatus === 409) {
+            debugLog("Outra aba pode ter recriado a party; tentando conectar novamente");
+            scheduleReconnect(attempt + 1);
+            return;
+          }
+
+          scheduleReconnect(attempt + 1);
         });
         return;
       }
 
-      finishReconnect(false);
+      scheduleReconnect(attempt + 1);
     });
   }
 
-  function finishReconnect(success) {
-    reconnectInProgress = false;
-    if (!success) {
-      debugLog("Reconexão falhou; aguardando ação do usuário");
-      partyToken = "";
-      GM_deleteValue(PARTY_TOKEN_KEY);
-      localStorage.removeItem(PARTY_TOKEN_KEY);
-      registered = false;
-      showPartySetup();
-      setStatus("PT NÃO CONECTADA", "off");
-    }
+  function scheduleReconnect(attempt) {
+    var delay = attempt >= 5
+      ? 15000
+      : Math.min(1000 * Math.pow(2, attempt), 8000);
+    debugLog("Reconexão agendada", { attempt: attempt + 1, delayMs: delay });
+    setStatus("RECONECTANDO", "off");
+    setTimeout(function () {
+      reconnectParty(attempt);
+    }, delay);
   }
 
   // =========================================================

@@ -114,6 +114,7 @@ Tambem e possivel escolher **So visualizar**. Esse modo mostra os dados da party
 - O botao de renomear permite alterar o personagem e a vocacao da aba atual.
 - O botao de exportacao copia um JSON com os dados atuais da party e de todos os personagens para o clipboard.
 - Se o token expirar ou o servico reiniciar, o script tenta reconectar automaticamente usando as credenciais salvas pelo Tampermonkey.
+- Quando varios navegadores tentam recuperar a mesma party ao mesmo tempo, respostas `409` sao tratadas como concorrencia normal: cada cliente aguarda e tenta conectar novamente, em vez de criar outra party ou voltar imediatamente ao formulario.
 - Uma bolinha no cabecalho indica a saude do servidor: verde online, amarela verificando e vermelha offline/sem resposta. Enquanto uma aba do jogo estiver aberta, o script verifica `/health` a cada 60 segundos.
 - Para diagnosticar problemas, abra o console do navegador com `F12` e procure mensagens com o prefixo `[Huntera Party Analyzer]`.
 - O painel pode ser arrastado e possui um modo grande para facilitar a visualizacao.
