@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Huntera Party Analyzer
 // @namespace    huntera-party-analyzer
-// @version      4.7
+// @version      4.9
 // @description  Analise de dano e experiencia de ate 4 personagens em uma party.
 // @homepageURL  https://github.com/redslugah/HunteraPartyAnalyzer
 // @updateURL    https://raw.githubusercontent.com/redslugah/HunteraPartyAnalyzer/main/Script.js
@@ -12,6 +12,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
+// @grant        GM_addValueChangeListener
 // @connect      hunterapartyanalyzer.onrender.com
 // ==/UserScript==
 
@@ -38,6 +39,7 @@
   var PARTY_NAME_KEY = "hunta-dps-party-name-v3";
   var PARTY_TOKEN_KEY = "hunta-dps-party-token-v3";
   var PARTY_PASSWORD_KEY = "hunta-dps-party-password-v1";
+  var PARTY_LEADER_KEY = "hunta-dps-party-leader-v1";
 
   var VOCATIONS = [
     { key: "EK", label: "Knight", color: "#e8544e" },
@@ -71,6 +73,8 @@
   var partyName = localStorage.getItem(PARTY_NAME_KEY) || "";
   var partyPassword = GM_getValue(PARTY_PASSWORD_KEY, "") || "";
   var partyToken = GM_getValue(PARTY_TOKEN_KEY, "") || "";
+  var leaderPartyName = GM_getValue(PARTY_LEADER_KEY, "") || "";
+  var isPartyLeader = leaderPartyName === partyName;
 
   if (!partyToken) {
     partyToken = localStorage.getItem(PARTY_TOKEN_KEY) || "";
@@ -91,7 +95,22 @@
   var selectedCharacterId = null;
   var latestStateRequestId = 0;
   var reconnectInProgress = false;
+  var reconnectGeneration = 0;
   var serverHealth = "unknown";
+
+  GM_addValueChangeListener(PARTY_TOKEN_KEY, function (key, oldValue, newValue, remote) {
+    if (!newValue || newValue === partyToken) {
+      return;
+    }
+
+    debugLog("Token da party atualizado por outra aba", { remote: remote });
+    partyToken = newValue;
+    registered = false;
+    reconnectInProgress = false;
+    reconnectGeneration++;
+    latestStateRequestId++;
+    poll();
+  });
 
   function debugLog(message, details) {
     if (details === undefined) {
@@ -342,6 +361,15 @@
     function submit(path) {
       var name = nameInput.value.trim();
       var password = passwordInput.value;
+      if (
+        path === "/party/create" &&
+        partyName &&
+        name.toLowerCase() === partyName.toLowerCase() &&
+        !isPartyLeader
+      ) {
+        error.textContent = "Somente o líder pode recriar esta PT.";
+        return;
+      }
       error.textContent = "";
       setStatus("CONECTANDO", "off");
 
@@ -369,6 +397,11 @@
         localStorage.setItem(PARTY_NAME_KEY, partyName);
         GM_setValue(PARTY_PASSWORD_KEY, partyPassword);
         GM_setValue(PARTY_TOKEN_KEY, partyToken);
+        isPartyLeader = status === 201 && path === "/party/create";
+        if (isPartyLeader) {
+          GM_setValue(PARTY_LEADER_KEY, partyName);
+          leaderPartyName = partyName;
+        }
         localStorage.removeItem(PARTY_TOKEN_KEY);
         nameSetupOpen = false;
         registered = false;
@@ -1325,7 +1358,7 @@
             }
 
             if (partyName && partyPassword && !reconnectInProgress) {
-              reconnectParty();
+              reconnectParty(0, reconnectGeneration);
               return;
             }
 
@@ -1361,10 +1394,17 @@
 
   function reconnectParty(attempt) {
     attempt = attempt || 0;
+    var generation = arguments.length > 1
+      ? arguments[1]
+      : reconnectGeneration;
+    if (generation !== reconnectGeneration) {
+      return;
+    }
     reconnectInProgress = true;
     debugLog("Iniciando reconexão da party", {
       partyName: partyName,
-      attempt: attempt + 1
+      attempt: attempt + 1,
+      leader: isPartyLeader
     });
     setStatus("RECONECTANDO", "off");
 
@@ -1372,10 +1412,17 @@
       party_name: partyName,
       password: partyPassword
     }, function (err, status, data) {
+      if (generation !== reconnectGeneration) {
+        return;
+      }
+
       if (!err && status === 200 && data && data.party_token) {
         debugLog("Party reconectada");
         partyToken = data.party_token;
         GM_setValue(PARTY_TOKEN_KEY, partyToken);
+        reconnectGeneration++;
+        latestStateRequestId++;
+        isPartyLeader = leaderPartyName === partyName;
         registered = false;
         reconnectInProgress = false;
         if (!viewerOnly && myName) {
@@ -1384,17 +1431,23 @@
         return;
       }
 
-      if (!err && status === 401) {
+      if (!err && status === 401 && isPartyLeader) {
         debugLog("Party não encontrada; tentando recriar");
         request("POST", "/party/create", {
           party_name: partyName,
           password: partyPassword
         }, function (createErr, createStatus, createData) {
+          if (generation !== reconnectGeneration) {
+            return;
+          }
+
           if (!createErr && createStatus === 201 && createData && createData.party_token) {
             debugLog("Party recriada após perda do estado do servidor");
             partyToken = createData.party_token;
             partyName = createData.party_name;
             GM_setValue(PARTY_TOKEN_KEY, partyToken);
+            reconnectGeneration++;
+            latestStateRequestId++;
             localStorage.setItem(PARTY_NAME_KEY, partyName);
             registered = false;
             reconnectInProgress = false;
@@ -1406,27 +1459,39 @@
 
           if (!createErr && createStatus === 409) {
             debugLog("Outra aba pode ter recriado a party; tentando conectar novamente");
-            scheduleReconnect(attempt + 1);
+            scheduleReconnect(attempt + 1, generation);
             return;
           }
 
-          scheduleReconnect(attempt + 1);
+          scheduleReconnect(attempt + 1, generation);
         });
         return;
       }
 
-      scheduleReconnect(attempt + 1);
+      if (!err && status === 401) {
+        debugLog("Party ausente; aguardando recriação pelo líder");
+        scheduleReconnect(attempt + 1, generation);
+        return;
+      }
+
+      scheduleReconnect(attempt + 1, generation);
     });
   }
 
-  function scheduleReconnect(attempt) {
+  function scheduleReconnect(attempt, generation) {
+    if (generation !== reconnectGeneration) {
+      return;
+    }
+    if (!isPartyLeader) {
+      debugLog("Reconexão aguardando o líder", { partyName: partyName });
+    }
     var delay = attempt >= 5
       ? 15000
       : Math.min(1000 * Math.pow(2, attempt), 8000);
     debugLog("Reconexão agendada", { attempt: attempt + 1, delayMs: delay });
     setStatus("RECONECTANDO", "off");
     setTimeout(function () {
-      reconnectParty(attempt);
+      reconnectParty(attempt, generation);
     }, delay);
   }
 
